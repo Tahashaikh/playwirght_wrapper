@@ -1,0 +1,55 @@
+{
+  "Run_only_on": "Integration",
+  "environments": {
+    "staging": {
+      "URL": "https://xyz.com/",
+      "BOX2": "127.0.0.1",
+      "BOX3": "127.0.0.1",
+      "BOX4": "127.0.0.1",
+      "PO": "127.0.0.1",
+      "CPU": "127.0.0.1",
+      "CC": "127.0.0.1",
+      "EPZ": "127.0.0.1",
+      "OBS": "127.0.0.1",
+      "UID": "admin",
+      "PWD": "admin",
+      "DATABASE": "DATABASE",
+      "OBS_UID": "USER",
+      "OBS_PWD": "PASSWORD",
+      "OBS_DATABASE": "OBS"
+    },
+    "QA": {
+      "URL": "https://xyz.com/",
+      "BOX2": "127.0.0.11",
+      "BOX3": "127.0.0.1",
+      "BOX4": "127.0.0.1",
+      "CPU": "127.0.0.1",
+      "CC": "127.0.0.1",
+      "EPZ": "127.0.0.1",
+      "OBS": "127.0.0.1",
+      "UID": "127.0.0.1",
+      "PWD": "PWD",
+      "DATABASE": "DATABASE",
+      "OBS_UID": "OBS_UID",
+      "OBS_PWD": "OBS_PWD",
+      "OBS_DATABASE": "OBS_DATABASE"
+    },
+    "Integration": {
+      "URL": "https://xyz.com/",
+      "BOX2": "10.90.95.72",
+      "BOX3": "10.90.95.73",
+      "BOX4": "10.90.95.74",
+      "PO": "10.90.95.76",
+      "CPU": "10.90.95.75",
+      "CC": "10.90.95.78",
+      "EPZ": "10.90.95.81",
+      "OBS": "10.90.95.77",
+      "UID": "UID",
+      "PWD": "PWD",
+      "DATABASE": "DATABASE",
+      "OBS_UID": "OBS_UID",
+      "OBS_PWD": "OBS_PWD",
+      "OBS_DATABASE": "OBS_DATABASE"
+    }
+  }
+}
