@@ -1,5 +1,9 @@
+#!/usr/bin/env python
 import os
 import sys
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
 import argparse
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +14,7 @@ from database import database_operations
 
 # Logging setup
 log_dir = get_folder_location('logs')
-log_file = os.path.join(log_dir, 'enhanced_extractor.log')
+log_file = os.path.join(log_dir, 'extractor_cmd.log')
 
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
@@ -32,19 +36,16 @@ logging.debug(f"Discovered data provider functions: {data_providers}")
 
 # Data provider function
 def data_provider(script_name):
-    provider_func_name = f"{script_name.replace('.py', '').replace('.csv', '').removeprefix('test_')}_data"
+    provider_func_name = f"{script_name.replace('.py', '').removeprefix('test_')}_data"
     if provider_func_name in data_providers:
-        try:
-            result = data_providers[provider_func_name]()
-            if isinstance(result, (pd.DataFrame, dict)):
-                return pd.DataFrame(result) if isinstance(result, dict) else result
-            else:
-                raise ValueError(f"Function {provider_func_name} did not return valid data.")
-        except Exception as e:
-            logging.error(f"Error in data provider {provider_func_name}: {e}")
+        result = data_providers[provider_func_name]()
+        if isinstance(result, (pd.DataFrame, dict)):
+            return pd.DataFrame(result) if isinstance(result, dict) else result
+        else:
+            logging.error(f"The function {provider_func_name} did not return a any data 'Check Query'")
             return pd.DataFrame()
     else:
-        raise ValueError(f"No data provider function defined for script: {script_name}")
+        logging.info(f"No data provider function defined for script: {script_name}")
 
 
 # CSV updater
@@ -52,44 +53,42 @@ def update_csv(csv_path, data_frame):
     try:
         if os.path.exists(csv_path):
             existing_df = pd.read_csv(csv_path)
-            # If headers mismatch, reset the CSV to headers only
-            if not data_frame.empty and existing_df.columns.tolist() != data_frame.columns.tolist():
-                logging.warning(f"Column mismatch in {csv_path}. Resetting CSV to headers only.")
-                data_frame.iloc[0:0].to_csv(csv_path, index=False)  # Save only headers
-                return False
-            # Update the CSV with new data
-            combined_df = pd.concat([existing_df, data_frame]).drop_duplicates()
+            header = existing_df.columns.tolist()
+            empty_df = pd.DataFrame(columns=header)
+            if not data_frame.empty and header != data_frame.columns.tolist():
+                raise ValueError(f"Column mismatch in {csv_path}.")
+
+            combined_df = pd.concat([empty_df, data_frame]).drop_duplicates()
             combined_df.to_csv(csv_path, index=False)
             logging.info(f"Updated CSV file: {csv_path}.")
         else:
             data_frame.to_csv(csv_path, index=False)
             logging.info(f"Created new CSV file: {csv_path}.")
-        return True
     except Exception as e:
-        logging.error(f"Error updating CSV {csv_path}: {e}")
-        raise
+        logging.error(f"Error updating CSV: {e}")
+        raise  # Re-raise the exception to signal failure and prevent processing from continuing
 
 
 # Process a single script
 def process_single_script(script_name, folder_path):
-    script_path = os.path.join(folder_path, script_name)
-    if not os.path.isfile(script_path):
-        raise FileNotFoundError(f"Script file {script_name} not found in folder {folder_path}.")
-
+    script_path = ''
+    script_name = script_name.replace('.py', '').replace('.csv', '')
+    script_name = script_name + '.py'
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file == script_name:
+                script_path = os.path.join(root, file)
+                if not os.path.isfile(script_path):
+                    raise FileNotFoundError(f"Script file {script_name} not found in folder {folder_path}.")
     try:
         logging.info(f"Processing single script: {script_name}")
         data = data_provider(script_name)
         if not data.empty:
-            csv_name = script_name.replace('.py', '.csv')
-            csv_path = os.path.join(folder_path, csv_name)
+            csv_path = script_path.replace('.py', '.csv')
             update_csv(csv_path, data)
             logging.info(f"Successfully processed script {script_name}.")
-        else:
-            logging.warning(f"No data returned for script: {script_name}. Resetting CSV to headers only.")
-            # Reset the CSV file to include only headers
-            csv_name = script_name.replace('.py', '.csv')
-            csv_path = os.path.join(folder_path, csv_name)
-            pd.DataFrame(columns=[]).to_csv(csv_path, index=False)  # Save only headers
+        # else:
+        #     logging.error(f"No data returned for script: {script_name}.")
     except ValueError as e:
         logging.error(str(e))
         raise
@@ -99,34 +98,33 @@ def process_single_script(script_name, folder_path):
 
 
 def process_script(script_name, folder_path, summary_stats):
+    csv_name = script_name.replace('.py', '.csv')
+    csv_path = os.path.join(folder_path, csv_name)
     try:
         data = data_provider(script_name)
-        if data.empty:
-            logging.warning(f"Data provider for {script_name} returned no data. Resetting CSV to headers only.")
-            csv_name = script_name.replace('.py', '.csv')
-            csv_path = os.path.join(folder_path, csv_name)
-            pd.DataFrame(columns=[]).to_csv(csv_path, index=False)  # Save only headers
-            summary_stats["errors"] += 1
-            return
-
         csv_name = script_name.replace('.py', '.csv')
         csv_path = os.path.join(folder_path, csv_name)
-        initial_rows = len(data)
-        success = update_csv(csv_path, data)
-        if success:
+        if not data.empty:
+            initial_rows = len(data)
+            update_csv(csv_path, data)
+            # Only increment stats if there is no error
             summary_stats["files_processed"] += 1
             summary_stats["rows_added"] += initial_rows
-        else:
-            summary_stats["errors"] += 1
+        # else:
+        #     logging.info(f"No data returned for script: {script_name}.")
     except Exception as e:
-        summary_stats["errors"] += 1
-        logging.error(f"Error processing script {script_name}: {e}")
+        existing_df = pd.read_csv(csv_path)
+        header = existing_df.columns.tolist()
+        empty_df = pd.DataFrame(columns=header)
+        empty_df.to_csv(csv_path, index=False)
+        summary_stats["files_not_processed"] += 1
+        # logging.error(f"Error processing script {script_name}: {e}")
 
 
 # Process all scripts
 def process_all_scripts(folder_path):
-    summary_stats = {"files_processed": 0, "rows_added": 0, "errors": 0}
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    summary_stats = {"files_processed": 0, "rows_added": 0, "files_not_processed": 0}
+    with ThreadPoolExecutor(max_workers=50) as executor:
         futures = []
         for root, _, files in os.walk(folder_path):
             for file in files:
@@ -138,7 +136,7 @@ def process_all_scripts(folder_path):
     print("Processing Summary:")
     print(f"Total Files Processed: {summary_stats['files_processed']}")
     print(f"Total Rows Added: {summary_stats['rows_added']}")
-    print(f"Total Errors Encountered: {summary_stats['errors']}")
+    print(f"Total Files Not Processed: {summary_stats['files_not_processed']}")
 
 
 # CLI handler
@@ -150,19 +148,22 @@ def main():
     run_parser = subparsers.add_parser("run", help="Process scripts in the specified folder or a single file.")
     run_parser.add_argument("--folder", type=str, default=get_folder_location("system_generated_scripts"),
                             help="Folder containing Python scripts to process.")
-    run_parser.add_argument("--f", type=str, help="Single file to process in the folder.")
+    run_parser.add_argument("--file", type=str, help="Single file to process in the folder.")
 
     args = parser.parse_args()
 
     if args.command == "run":
-        if args.f:
+        if args.file:
             try:
-                process_single_script(args.f, args.folder)
-                print(f"Successfully processed single script: {args.f}")
+                process_single_script(args.file, args.folder)
+                print(f"Successfully processed single script: {args.file}")
             except Exception as e:
                 print(f"Error: {e}")
         else:
-            process_all_scripts(args.folder)
+            if os.path.isabs(args.folder):
+                process_all_scripts(args.folder)
+            else:
+                process_all_scripts(get_folder_location(args.folder, get_folder_location("system_generated_scripts")))
 
 
 if __name__ == '__main__':

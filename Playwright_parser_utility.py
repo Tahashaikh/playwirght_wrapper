@@ -1,7 +1,10 @@
+import csv
+import json
 import numbers
 import os
 import random
 import time
+from textwrap import indent
 from tkinter import messagebox
 
 import pandas as pd
@@ -150,24 +153,32 @@ import random
 import socket
 from database.Queries import *
 from database.database_connection import *
+from utils.general_methods import *
 from utils.utils import *
 from conftest import *
+from faker import Faker
+
+fake = Faker()
 
 test_data = read_json(get_file_location('test_data.json'))
 current_branch_code = test_data['branch_code']
 username = test_data['username']
+username1 = test_data['username1']
 authorizer = test_data['authorizer']
+authorizer1 = test_data['authorizer1']
 password = test_data['password']
+cpu_brn = test_data['CPU_BRN']
+KHI_MAIN_BRN = test_data['KHI_MAIN_BRN']
 
 
-# def update_system_ip(Enable=False):
-#     if Enable:
-#         current_system_ip = get_system_ip()
-#         execute_query(int(current_branch_code), Queries.update_user_system_ip,
-#                       values=(current_system_ip, current_branch_code, username))
-#     else:
-#         execute_query(int(current_branch_code), Queries.update_user_system_ip,
-#                      values=("null", current_branch_code, username))
+def update_system_ip(Enable=False):
+    if Enable:
+        current_system_ip = get_system_ip()
+        execute_query(int(current_branch_code), Queries.update_user_system_ip,
+                      values=(current_system_ip, current_branch_code, username))
+    else:
+        execute_query(int(current_branch_code), Queries.update_user_system_ip,
+                      values=(None, current_branch_code, username))
 """
 
     try:
@@ -216,6 +227,15 @@ def read_values_from_csv(csv_path):
         return [], []
 
 
+def generate_Josn_operations(column_names, name):
+    values = ""
+    for i in list(column_names):
+        value = f"'{i}': {i}"
+        values = f"{values}, {value}".removeprefix(",").removeprefix(" ")
+    lines = "data_values = {" + f"{values}" + "}\nadd_voucher_records(os.path.basename(__file__), **" + f"{name}" + ", **data_values)\n"
+    return lines.replace('\n', '\n' + ' ' * 4)
+
+
 def process_script_with_ast(script_path, updated_script_path, csv_path, script_name, allure_parameters):
     logging.info(f"Processing script: {script_path}")
 
@@ -228,30 +248,89 @@ def process_script_with_ast(script_path, updated_script_path, csv_path, script_n
         tree = ast.parse(script_content.strip())
         static_code = []
         function_name = extract_function_name(script_content)
-
+        column_names, csv_data = read_values_from_csv(csv_path)
         comment_lines = sorted(comments.keys())
         current_comment_index = 0
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Str):
-                multiline_comment_lines += f"{node.value.s}\n"
-            if isinstance(node, ast.FunctionDef):
-                function_name = node.name
-                if not function_name.startswith('test_'):
-                    function_name = 'test_' + function_name
-            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-                func = node.value.func
-                if isinstance(func, ast.Attribute):
-                    if not (func.attr == 'close' and func.value.id in {'browser', 'context'}):
+            # ast_dump = ast.dump(node, indent=4)
+            # print(ast_dump)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                try:
+                    top_comments = node.value.value
+                    new_comments = (str(top_comments)).replace("'", "").replace(",,", "")
+                    data_dict = {}
+                    for line in new_comments.splitlines():
+                        if line:
+                            key, value = line.split(":", 1)
+                            data_dict[key.strip()] = value.replace(",", "").replace("<", "").replace(">", "").strip()
+                    data_dict["Scenario_name"] = script_name
+                    headers = list(data_dict.keys())
+                    rows = [list(data_dict.values())]
+                    csv_file_path = project_root + "/Scenarios_discription.csv"
+                    if os.path.exists(csv_file_path):
+                        with open(csv_file_path, 'r', newline='') as file:
+                            reader = csv.reader(file)
+                            existing_rows = list(reader)
+                        for row in rows:
+                            if row not in existing_rows:
+                                with open(csv_file_path, 'a', newline='') as file:
+                                    writer = csv.writer(file)
+                                    writer.writerows(rows)
+                    else:
+                        with open(csv_file_path, 'w', newline='') as file:
+                            writer = csv.writer(file)
+                            writer.writerow(headers)
+                            writer.writerows(rows)
+                except Exception as e:
+                    logging.error(f"Comment is not proper {script_path}: {e}")
+                # create a file on the project and write the data
+
+            # if isinstance(node, ast.Assign):
+            #     for target in node.targets:
+            #         if isinstance(target, ast.Name) and target.id == "Order" or target.id == "order":
+            #             if isinstance(node.value, ast.Constant):
+            #                     order = node.value.value
+            if ast.unparse(node) == 'None':
+                break
+            if isinstance(node, ast.Assign):
+                if isinstance(node.value, ast.Call):
+                    if (isinstance(node.value.func,
+                                   ast.Name) and node.value.func.id == "get_voucher_ref_detail"):
+                        static_code.append("\n# Add Posting Data in JSON".replace('\n', '\n' + ' ' * 4))
+                        static_code.append(astor.to_source(node).strip().replace('\n', ' ').replace('    ', ''))
+                        static_code.append(generate_Josn_operations(column_names, node.targets[0].id))
+            elif isinstance(node, ast.Expr):
+                if isinstance(node.value, ast.Str):
+                    multiline_comment_lines += f"{node.value.s}\n"
+                elif isinstance(node.value, ast.Call):
+                    func = node.value.func
+                    if isinstance(func, ast.Name) and func.id in {"remove_voucher_records","handle_popups"}:
+                        static_code.append(astor.to_source(node).strip().replace('\n', ' ').replace('    ', ''))
+                    elif isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "screenshot":
+                        static_code.append("\n# Add Posting Data in JSON".replace('\n', '\n' + ' ' * 4))
+                        static_code.append(
+                            astor.to_source(node).replace(astor.to_source(node),
+                                                          "voucher = get_voucher_ref_detail(page)"))
+                        static_code.append(generate_Josn_operations(column_names, "voucher"))
+                    elif (isinstance(func, ast.Attribute) and not (
+                            func.attr == 'close' and getattr(func.value, 'id', None) in {'browser', 'context'})
+                          and not func.attr == "screenshot"):
+
                         line_number = node.lineno
-                        static_code.append(astor.to_source(node).replace('\n', '').replace('    ', '').strip())
-                        # print(static_code)
+                        static_code.append(astor.to_source(node).strip().replace('\n', ' ').replace('    ', ''))
                         while current_comment_index < len(comment_lines) and comment_lines[
                             current_comment_index] <= line_number:
                             static_code.insert(len(static_code) - 1, comments[comment_lines[current_comment_index]])
                             current_comment_index += 1
+            elif isinstance(node, ast.FunctionDef):
+                function_name = node.name
+                function_name = function_name if function_name.startswith('test_') else 'test_' + function_name
+            elif isinstance(node, ast.If):
+                static_code.append("page.wait_for_timeout(3000)".replace('\n', '\n' + ' ' * 4))
+                static_code.append(astor.to_source(node).replace('\n', '\n' + ' ' * 4))
 
-        column_names, csv_data = read_values_from_csv(csv_path)
+        # column_names, csv_data = read_values_from_csv(csv_path)
         param_names = ', '.join(column_names)
         static_code_str = '\n    '.join(static_code)
         top_comment = f'"""{multiline_comment_lines}"""'
@@ -263,9 +342,11 @@ def process_script_with_ast(script_path, updated_script_path, csv_path, script_n
         else:
             sys_ip = """update_system_ip()"""
         if not method_exists(db_operations_path, func_name):
+            pass
             default = """@pytest.mark.order()"""
         else:
             default = """@pytest.mark.order(1)\n@pytest.mark.dataAvailable"""
+            # default = """@pytest.mark.dataAvailable"""
 
         updated_script_content = f"""
 {top_comment}        
@@ -275,8 +356,10 @@ import pandas as pd
 import allure
 
 from database.database_operations import *
+from utils.general_methods import *
+from utils.popup_handler import handle_popups
 from playwright.sync_api import Page, expect
-from utils.pre_req_test import pre_req_user_setup, update_user_cert_dates, pre_req_user_check
+from utils.pre_req_test import user_setups
 current_data = datetime.now().strftime("%d/%m/%Y")
 csv_data = read_values_from_csv(f"{{os.path.dirname(__file__)}}"+r'\\{script_name}.csv')\n
 
@@ -290,10 +373,11 @@ def {script_name}(page: Page, count, {', '.join(column_names)}, skip, base_url) 
     allure.dynamic.title(f"{script_name.replace('test_', '')}_TC_{{count}}")
     if skip:
         pytest.skip("{script_name.replace('test_', '')}.csv has no data")
-    # pre_req_user_check(brncd, usernamebox)
-    # update_user_cert_dates(brncd, usernamebox)
+    user_setups(brncd, usernamebox)
     {sys_ip}
     {static_code_str}\n
+
+
 """
 
         with open(updated_script_path, 'w') as file:
@@ -361,7 +445,21 @@ def get_lines_to_replace(file):
                     generated_line = (line[1].replace(extracted_lines_strings[0], f"str({get_by_txt})"))
                     all_matches.append([line[1], generated_line])
             elif 2 <= len(extracted_lines_strings) < 4:
-                if 'get_by_text' in line[1] and 'fill' in line[1]:
+                if 'get_by_role' in line[1] and 'fill' in line[1] and 'name=' in line[1]:
+                    column_name = sanitize_name(str(extracted_lines_strings_with_out_quotes[0]))
+                    unique_column_name = unique_variable_name(csv_variables, column_name)
+                    csv_variables.append(unique_column_name)
+                    fill_data[unique_column_name] = extracted_lines_strings_with_out_quotes[2]
+                    var_val = line[1].replace(extracted_lines_strings[2], f"str({unique_column_name})")
+                    all_matches.append([line[1], var_val])
+                elif ("get_by_role('t" in line[1] or 'get_by_role("t' in line[1]) and 'fill' in line[1]:
+                    column_name = sanitize_name(str(extracted_lines_strings_with_out_quotes[0]))
+                    unique_column_name = unique_variable_name(csv_variables, column_name)
+                    csv_variables.append(unique_column_name)
+                    fill_data[unique_column_name] = extracted_lines_strings_with_out_quotes[1]
+                    var_val = line[1].replace(extracted_lines_strings[1], f"str({unique_column_name})")
+                    all_matches.append([line[1], var_val])
+                elif 'get_by_text' in line[1] and 'fill' in line[1] and 'get_by_role' not in line[1]:
                     get_by_txt_data = unique_variable_name(csv_variables, "get_by_txt_data")
                     csv_variables.append(get_by_txt_data)
                     fill_data[get_by_txt_data] = extracted_lines_strings_with_out_quotes[0]
@@ -371,21 +469,37 @@ def get_lines_to_replace(file):
                     var_val = (line[1].replace(extracted_lines_strings[0], f'str({get_by_txt_data})')
                                .replace(extracted_lines_strings[1], f'str({get_by_txt_data_val})'))
                     all_matches.append([line[1], var_val])
+                elif 'get_by_label' in line[1] and 'locator' in line[1] and 'fill' in line[1]:
+                    column_name = sanitize_name(str(extracted_lines_strings_with_out_quotes[1]))
+                    unique_column_name = unique_variable_name(csv_variables, column_name)
+                    csv_variables.append(unique_column_name)
+                    fill_data[unique_column_name] = extracted_lines_strings_with_out_quotes[2]
+                    var_val = line[1].replace(extracted_lines_strings[2], f"str({unique_column_name})")
+                    all_matches.append([line[1], var_val])
                 elif 'get_by_text' in line[1] and 'press' in line[1]:
                     get_by_txt = unique_variable_name(csv_variables, "get_by_txt")
                     csv_variables.append(get_by_txt)
                     fill_data[get_by_txt] = extracted_lines_strings_with_out_quotes[0]
                     generated_line = (line[1].replace(extracted_lines_strings[0], f"str({get_by_txt})"))
                     all_matches.append([line[1], generated_line])
-                elif 'get_by_text' in line[1] and 'click(' in line[1]:
+                elif 'get_by_text' in line[1] and 'click(' in line[1] and 'get_by_role' not in line[1]:
                     get_by_txt = unique_variable_name(csv_variables, "get_by_txt")
                     csv_variables.append(get_by_txt)
                     fill_data[get_by_txt] = extracted_lines_strings_with_out_quotes[0]
                     generated_line = (line[1].replace(extracted_lines_strings[0], f"str({get_by_txt})"))
                     all_matches.append([line[1], generated_line])
-                elif ('fill(' in line[1] or 'type(' in line[1] or "filter" in line[1] or "get_by_role('cell'" in line[
-                    1] or "get_by_role('row'" in line[1] or 'get_by_role("row"' in line[1] or 'get_by_role("cell"' in
-                      line[1]) and ('filter(has_text=re.compile' not in line[1]):
+                elif 'get_by_role' in line[1] and 'get_by_text' in line[1] and 'click(' in line[1]:
+                    column_name = sanitize_name(str(extracted_lines_strings_with_out_quotes[0]))
+                    unique_column_name = unique_variable_name(csv_variables, column_name)
+                    csv_variables.append(unique_column_name)
+                    fill_data[unique_column_name] = extracted_lines_strings_with_out_quotes[1]
+                    generated_line = (line[1].replace(extracted_lines_strings[1], f"str({unique_column_name})"))
+                    all_matches.append([line[1], generated_line])
+                elif ('fill(' in line[1] or 'type(' in line[1] or "filter" in line[1] or "get_by_role('cell'" in
+                      line[1] or "get_by_role('row'" in line[1] or 'get_by_role("row"' in line[
+                          1] or 'get_by_role("cell"' in
+                      line[1]) and ('filter(has_text=re.compile' not in line[1] and 'get_by_role("t' not in line[1]
+                                    and "get_by_role('t" not in line[1]):
                     column_name = sanitize_name(str(extracted_lines_strings_with_out_quotes[0]))
                     unique_column_name = unique_variable_name(csv_variables, column_name)
                     csv_variables.append(unique_column_name)
@@ -401,8 +515,8 @@ def get_lines_to_replace(file):
                     column_name2 = unique_variable_name(csv_variables, column_name2)
                     csv_variables.append(column_name)
                     csv_variables.append(column_name2)
-                    fill_data[column_name] = extracted_lines_strings_with_out_quotes[0]
-                    fill_data[column_name2] = extracted_lines_strings_with_out_quotes[2]
+                    fill_data[column_name] = extracted_lines_strings_with_out_quotes[1]
+                    fill_data[column_name2] = extracted_lines_strings_with_out_quotes[3]
                     csv_variables.append(column_name)
                     csv_variables.append(column_name2)
                     var_val = (line[1].replace(extracted_lines_strings[1], f'str({column_name})')
@@ -539,6 +653,7 @@ def Runner(source_dir, generation_dir):
             allure_params = script_directory.replace(updated_scripts_dir, "").removesuffix('\\').removeprefix(
                 '\\').split('\\')
             path_csv = os.path.join(script_directory, f'{script_name}.csv')
+            formate_fill_lines_in_file(script_path)
             match_lines, fill_data, = get_lines_to_replace(script_path)
             save_data_to_csv([fill_data], path_csv)
             path_csv = path_csv.replace(os.path.dirname(updated_scripts_dir), '').removeprefix('\\')

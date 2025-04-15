@@ -3,6 +3,7 @@ import json
 import random
 import socket
 import string
+import subprocess
 
 import pandas as pd
 import pytest
@@ -48,9 +49,11 @@ def generate_random_number(minimum, maximum):
     return random.randint(minimum, maximum)
 
 
-def read_values_from_csv(path):
-    df = pd.read_csv(path)
-    print(df.index)
+def read_values_from_csv(path, name=None):
+    # utility_path = get_root_path_join("extractor.bat")
+    # command = [utility_path, "run", "--file", name]
+    # subprocess.run(command, check=True, shell=True)
+    df = pd.read_csv(path, dtype=str)
     if df.empty or df.isnull().all().all():
         data = {col: [None] for col in df.columns}
         data['skip'] = [True]
@@ -61,6 +64,5 @@ def read_values_from_csv(path):
     df.reset_index(inplace=True)
     df.rename(columns={'index': 'count'}, inplace=True)
     return df.values.tolist()
-
 
 # read_values_from_csv("E:\\ALL_PROJECTS\\Playwright_R2_Automation\\R2-Automation\\system_generated_scripts\\TLR_OBC_IBC_UC2_OBC_LO_C\\test_TLR_OBC_IBC_UC2_OBC_LO_C_S1.csv")

@@ -76,3 +76,23 @@ def handle_popup(func):
         return result
 
     return wrapper
+
+
+def handle_popups(page: Page):
+    page.wait_for_timeout(2000)
+    popup_button = page.locator(".el-message-box__message")
+    if popup_button.is_visible():
+        message = popup_button.text_content().strip().lower()
+        valid_messages = [
+            "NO record Found",
+            "No record found."
+        ]
+        for valid_message in valid_messages:
+            if valid_message.strip().lower() in message.lower():
+                # print(f"Pop-up message matched: {valid_message}")
+                # page.locator("button[class='el-button el-button--primary']").click(
+                if page.get_by_role('button', name='Ok').is_visible():
+                    page.get_by_role('button', name='Ok').click()
+                elif page.get_by_role('button', name='Yes').is_visible():
+                    page.get_by_role('button', name='Yes').click()
+                page.wait_for_timeout(2000)
